@@ -1,1 +1,7 @@
-# International-Construction-LegalTech-Toolkit
+解决大型地下工程中因地勘不符导致的“索赔时效遗漏”痛点
+在大型地下工程（如深基坑连续墙或盾构推进）中，现场工程师经常遭遇与《地质基准报告》（GBR）不符的“不可预见物理条件”（如巨型孤石或未知地下旧桩）。然而，由于项目团队的精力往往集中于紧急处置现场的技术险情，极易忽略 FIDIC 1999/2017 框架下 Clause 20 所规定的“28天索赔通知”严格时效。这种程序上的疏忽（Time-bar limitation），直接导致承包商丧失本应合理获取的工期延长（EOT）及费用补偿权利，造成巨额亏损。
+本 Pandas 自动化分析模块，通过批量读取现场的《每日施工日志》，将地质异常事件自动映射至 FIDIC Clause 4.12 的判定逻辑中。算法不仅实时核对地勘数据的“不可预见性”，更对 28 天通知时效进行倒计时与逾期拦截。它成功将国际工程中“被动且滞后的人工索赔管理”转化为“主动、前置且数据驱动的合规风控系统
+
+Resolving Claim Time-Bar Omissions in Large-Scale Underground Projects due to Geotechnical Discrepancies
+In large-scale underground engineering (e.g., diaphragm wall trenching or shield tunneling), site engineers frequently encounter unforeseeable physical conditions—such as massive boulders or uncharted old piles—that strictly deviate from the Geotechnical Baseline Report (GBR). However, with project teams primarily focused on mitigating immediate technical hazards on-site, they frequently neglect the strict 28-day notice period mandated by FIDIC Clause 20. This procedural oversight regarding the time-bar limitation invariably results in the forfeiture of the Contractor's legitimate rights to claim Extensions of Time (EOT) and financial compensation, leading to substantial commercial losses.
+This Pandas-driven automation module processes daily site logs in bulk, mapping geological anomalies directly into the validation logic of FIDIC Clause 4.12. The algorithm not only cross-references the "unforeseeability" against the GBR data but also strictly enforces the 28-day notice countdown to intercept overdue risks. Ultimately, it transforms the traditionally reactive and delayed manual claim management into a proactive, preemptive, and data-driven compliance framework.
