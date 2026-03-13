@@ -1,0 +1,185 @@
+新奥法（NATM）核心原理是"允许围岩适度变形→形成承载拱→再施作二衬"。实际施工中常出现：
+
+监测数据显示拱顶沉降超过设计阈值（如设计≤30mm，实测达75mm）
+工程师要求加密锚杆、增厚喷射混凝土
+原设计支护参数按Q值/RMR II级围岩设计，实际遭遇IV级
+
+关键监测量： 拱顶沉降（Crown Settlement）、水平收敛（Horizontal Convergence）、锚杆轴力（Bolt Load）围岩等级劣于设计预期（地质报告失真）
+  ├─ Cl.4.10  雇主提供的现场数据（Site Data）
+  │     → 雇主须提供地勘报告，承包商"合理依赖"
+  │     → 若报告低估围岩等级 → 雇主承担风险
+  │
+  ├─ Cl.4.12  不可预见物质条件
+  │     → 触发：有经验承包商无法预见该围岩等级
+  │     → 权利：Cost + Profit + EOT
+  │
+  └─ Cl.13.1  工程师指令增加支护（变更）
+        → 加密锚杆 = Variation Order
+        → 按 Cl.12.3 估价：锚杆单价 × 增加数量
+        
+python        
+# fidic_toolkit/natm_support_claim_checker.py
+# FIDIC Red Book 1999 — NATM Primary Support Variation Claim
+# Technical → Legal → Code: Rock class deviation triggers Cl.4.12 + Cl.13.1
+
+from dataclasses import dataclass, field
+from typing import List, Optional
+from enum import IntEnum
+
+class RockClass(IntEnum):
+    """Norwegian Q-system / Chinese GB50218 rock mass classification."""
+    CLASS_I   = 1   # Excellent — RQD 90-100
+    CLASS_II  = 2   # Good
+    CLASS_III = 3   # Fair
+    CLASS_IV  = 4   # Poor
+    CLASS_V   = 5   # Very Poor — requires immediate support
+
+@dataclass
+class MonitoringReading:
+    chainage_m: float           # Distance along tunnel axis (m)
+    crown_settlement_mm: float  # Measured crown settlement
+    convergence_mm: float       # Horizontal convergence
+
+@dataclass
+class SupportVariation:
+    """Additional support items ordered by Engineer (Cl.13.1 VO)."""
+    item: str
+    original_qty: float
+    additional_qty: float
+    unit: str
+    unit_rate_cny: float
+
+def analyse_natm_claim(
+    design_rock_class: RockClass,
+    actual_rock_class: RockClass,
+    design_crown_settlement_limit_mm: float,
+    readings: List[MonitoringReading],
+    support_variations: List[SupportVariation],
+    notice_issued: bool
+) -> dict:
+    """
+    Determines NATM support over-run claim eligibility under
+    FIDIC 1999 Cl.4.10 / Cl.4.12 / Cl.13.1.
+
+    Parameters reflect real tunnel monitoring workflow:
+    - Rock class deviation → Cl.4.12 unforeseeability test
+    - Monitoring exceedance → technical trigger for VO
+    - Support VO → Cl.13.1 + Cl.12.3 cost evaluation
+    """
+
+    report = {
+        "clause_primary"  : "FIDIC 1999 Cl.4.12 + Cl.13.1",
+        "scenario"        : "NATM primary support over-run, rock class deviation",
+        "technical_findings": {},
+        "legal_findings"  : {},
+        "cost_summary_cny": 0.0,
+        "eligible"        : False,
+        "warnings"        : []
+    }
+
+    # ── TECHNICAL GATE 1: Rock class deviation ───────────────────────
+    class_deviation = int(actual_rock_class) - int(design_rock_class)
+    report["technical_findings"]["design_rock_class"] = design_rock_class.name
+    report["technical_findings"]["actual_rock_class"]  = actual_rock_class.name
+    report["technical_findings"]["class_deviation"]    = class_deviation
+
+    if class_deviation <= 0:
+        report["warnings"].append(
+            "Actual rock class ≥ design class — Cl.4.12 basis weak."
+        )
+        return report
+
+    # ── TECHNICAL GATE 2: Monitoring threshold exceedance ────────────
+    exceedances = [
+        r for r in readings
+        if r.crown_settlement_mm > design_crown_settlement_limit_mm
+    ]
+    report["technical_findings"]["monitoring_exceedances"] = len(exceedances)
+    report["technical_findings"]["max_settlement_mm"] = (
+        max(r.crown_settlement_mm for r in readings) if readings else 0
+    )
+    report["technical_findings"]["design_limit_mm"] = design_crown_settlement_limit_mm
+
+    # ── LEGAL GATE 1: Cl.4.12 unforeseeability (rock class ≥ 2 steps worse)
+    unforeseeable = class_deviation >= 2
+    report["legal_findings"]["cl_4_12_unforeseeable"] = unforeseeable
+    if not unforeseeable:
+        report["warnings"].append(
+            "Single-class deviation may be deemed foreseeable by Engineer."
+        )
+
+    # ── LEGAL GATE 2: Cl.20.1 notice ────────────────────────────────
+    report["legal_findings"]["notice_issued"] = notice_issued
+    if not notice_issued:
+        report["warnings"].append(
+            "CRITICAL: No Cl.20.1 notice recorded — time-bar risk."
+        )
+
+    # ── COST EVALUATION: Cl.13.1 + Cl.12.3 ─────────────────────────
+    total_variation_cost = 0.0
+    variation_details = []
+
+    for sv in support_variations:
+        item_cost = sv.additional_qty * sv.unit_rate_cny
+        total_variation_cost += item_cost
+        variation_details.append({
+            "item"          : sv.item,
+            "additional_qty": f"{sv.additional_qty} {sv.unit}",
+            "rate_cny"      : sv.unit_rate_cny,
+            "subtotal_cny"  : round(item_cost, 2)
+        })
+
+    profit_rate = 0.08  # Cl.4.12 ¶4: Cost + reasonable profit
+    profit_cny  = total_variation_cost * profit_rate
+    report["cost_summary_cny"] = round(total_variation_cost + profit_cny, 2)
+    report["cost_breakdown"]   = variation_details
+    report["profit_cny"]       = round(profit_cny, 2)
+
+    # ── FINAL ELIGIBILITY ────────────────────────────────────────────
+    report["eligible"] = (
+        unforeseeable and
+        notice_issued and
+        len(exceedances) > 0
+    )
+    if report["eligible"]:
+        report["entitlements"] = [
+            "Additional Cost — Cl.4.12 + Cl.13.1 + Cl.12.3",
+            f"Profit (8%) — Cl.4.12 ¶4: ¥{report['profit_cny']:,.0f}",
+            "EOT — Cl.8.4(b) for critical path impact"
+        ]
+
+    return report
+
+
+# ── Demo: Zhongnanshan-style mountain tunnel, Shaanxi ────────────────
+if __name__ == "__main__":
+    import json
+
+    readings = [
+        MonitoringReading(chainage_m=450, crown_settlement_mm=28, convergence_mm=12),
+        MonitoringReading(chainage_m=480, crown_settlement_mm=62, convergence_mm=31),  # exceeds
+        MonitoringReading(chainage_m=510, crown_settlement_mm=78, convergence_mm=44),  # exceeds
+    ]
+
+    variations = [
+        SupportVariation("φ25 rock bolt (additional)",
+                         original_qty=200, additional_qty=380,
+                         unit="No.", unit_rate_cny=185),
+        SupportVariation("Shotcrete C25 thickness increase 150→250mm",
+                         original_qty=0, additional_qty=420,
+                         unit="m³", unit_rate_cny=620),
+        SupportVariation("Steel arch rib HW150 (unplanned)",
+                         original_qty=0, additional_qty=24,
+                         unit="No.", unit_rate_cny=3800),
+    ]
+
+    result = analyse_natm_claim(
+        design_rock_class=RockClass.CLASS_II,
+        actual_rock_class=RockClass.CLASS_IV,    # 2-class deterioration
+        design_crown_settlement_limit_mm=30.0,
+        readings=readings,
+        support_variations=variations,
+        notice_issued=True
+    )
+
+    print(json.dumps(result, ensure_ascii=False, indent=2))
