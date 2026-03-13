@@ -1,0 +1,134 @@
+浅埋暗挖法（Cut-and-Cover / Mining Method）在城市地下施工中，覆土厚度往往仅1~2倍洞径。风险：
+
+- 拱顶松弛→地面沉降槽形成（Gaussian Settlement Trough）
+- 邻近建筑物差异沉降超限（如地铁规范≤10mm）
+- 第三方（居民/业主）提出损害赔偿
+
+**Peck公式预测沉降槽：**
+`S(x) = S_max × exp(-x²/2i²)`
+
+⚖️ 法律层
+地面沉降损坏第三方财产
+  ├─ Cl.4.6   合作（Cooperation）
+  │     → 承包商须与相邻工程承包商协调
+  │     → 若协调不足导致沉降 → 承包商责任
+  │
+  ├─ Cl.17.1  工程照管（Care of the Works）
+  │     → 竣工前工程及邻近财产由承包商照管
+  │     → 第三方财产损坏 → 原则上承包商赔偿
+  │
+  └─ 反向索赔路径：若雇主提供的设计有缺陷
+        → Cl.17.1 例外条款：设计缺陷 → 雇主责任
+        → 承包商可反向索赔 Cost（Cl.20.1通知）
+        
+# fidic_toolkit/shallow_tunnel_settlement_monitor.py
+# FIDIC Red Book 1999 — Shallow Tunnel Settlement Risk & Cl.17.1 Liability
+# Peck (1969) settlement trough model + FIDIC liability classifier
+
+import math
+from dataclasses import dataclass
+from typing import List
+
+@dataclass
+class ThirdPartyStructure:
+    name: str
+    distance_from_centerline_m: float   # x in Peck formula
+    allowable_settlement_mm: float       # e.g. 10mm for metro standard
+    is_critical: bool                    # hospital, historic building, etc.
+
+def peck_settlement(
+    s_max_mm: float,
+    trough_width_i_m: float,
+    x_m: float
+) -> float:
+    """
+    Peck (1969) Gaussian settlement trough formula.
+    S(x) = S_max * exp(-x² / 2i²)
+
+    Args:
+        s_max_mm: Maximum settlement at tunnel centreline (mm)
+        trough_width_i_m: Trough width parameter i (m), typically 0.4~0.6 × z
+        x_m: Horizontal distance from tunnel centreline (m)
+    """
+    return s_max_mm * math.exp(-(x_m ** 2) / (2 * trough_width_i_m ** 2))
+
+
+def assess_third_party_risk(
+    s_max_mm: float,
+    trough_width_i_m: float,
+    structures: List[ThirdPartyStructure],
+    design_defect_confirmed: bool = False
+) -> dict:
+    """
+    Assesses third-party settlement risk and maps FIDIC liability.
+
+    FIDIC logic:
+    - Exceedance by construction method → Cl.17.1 Contractor liability
+    - Exceedance by design defect       → Cl.17.1 exception → Employer liable
+    - All cases require Cl.20.1 notice if contractor seeks reimbursement
+    """
+    assessments = []
+    any_exceedance = False
+
+    for s in structures:
+        predicted_mm = peck_settlement(s_max_mm, trough_width_i_m,
+                                       s.distance_from_centerline_m)
+        exceeded = predicted_mm > s.allowable_settlement_mm
+
+        if exceeded:
+            any_exceedance = True
+
+        # Liability determination under Cl.17.1
+        if exceeded and design_defect_confirmed:
+            liability = "EMPLOYER (Cl.17.1 exception — design defect)"
+            action    = "Contractor: issue Cl.20.1 notice, claim Cost"
+        elif exceeded:
+            liability = "CONTRACTOR (Cl.17.1 — construction method)"
+            action    = "Contractor: implement mitigation (grouting/dewatering)"
+        else:
+            liability = "N/A — within tolerance"
+            action    = "Continue monitoring per Cl.4.6 cooperation protocol"
+
+        assessments.append({
+            "structure"          : s.name,
+            "distance_m"         : s.distance_from_centerline_m,
+            "predicted_mm"       : round(predicted_mm, 2),
+            "allowable_mm"       : s.allowable_settlement_mm,
+            "exceeded"           : exceeded,
+            "critical_structure" : s.is_critical,
+            "fidic_liability"    : liability,
+            "recommended_action" : action
+        })
+
+    return {
+        "peck_model": {
+            "s_max_mm"         : s_max_mm,
+            "trough_width_i_m" : trough_width_i_m
+        },
+        "design_defect_confirmed": design_defect_confirmed,
+        "any_exceedance"         : any_exceedance,
+        "structures"             : assessments
+    }
+
+
+# ── Demo: Urban shallow tunnel beneath existing buildings ────────────
+if __name__ == "__main__":
+    import json
+
+    structures = [
+        ThirdPartyStructure("Residential Block A",  distance_from_centerline_m=8,
+                            allowable_settlement_mm=15, is_critical=False),
+        ThirdPartyStructure("Gas Pipeline DN300",    distance_from_centerline_m=4,
+                            allowable_settlement_mm=10, is_critical=True),
+        ThirdPartyStructure("Heritage Building B",  distance_from_centerline_m=14,
+                            allowable_settlement_mm=5,  is_critical=True),
+    ]
+
+    result = assess_third_party_risk(
+        s_max_mm=22.0,          # Predicted centreline settlement
+        trough_width_i_m=6.5,   # i = 0.5 × burial depth (z=13m)
+        structures=structures,
+        design_defect_confirmed=False
+    )
+
+    print(json.dumps(result, ensure_ascii=False, indent=2))
